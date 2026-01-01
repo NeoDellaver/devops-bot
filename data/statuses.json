@@ -1,0 +1,7 @@
+[
+  {"name": "Новичок", "xp_required": 0},
+  {"name": "Junior DevOps", "xp_required": 50},
+  {"name": "Middle DevOps", "xp_required": 150},
+  {"name": "Senior DevOps", "xp_required": 300},
+  {"name": "DevOps Architect", "xp_required": 600}
+]
