@@ -1,0 +1,17 @@
+# env
+.env
+.env.*
+
+# python
+__pycache__/
+*.pyc
+venv/
+
+# runtime data
+logs/
+*.log
+*.db
+
+# system
+.DS_Store
+Thumbs.db
