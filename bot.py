@@ -3,8 +3,8 @@ import logging
 import os
 from logging.handlers import RotatingFileHandler
 from aiogram import Bot, Dispatcher
-from aiogram.types import Message, CallbackQuery
-from aiogram.exceptions import TelegramAPIError  # ← исправлено!
+from aiogram.types import Message, CallbackQuery, ErrorEvent
+from aiogram.exceptions import TelegramAPIError, TelegramNetworkError
 from config import BOT_TOKEN
 from database import init_db
 from handlers import start, modules, dareira, progress, admin
@@ -47,7 +47,7 @@ def setup_logging():
     logging.basicConfig(
         level=logging.INFO,
         handlers=[file_handler, console_handler],
-        force=True  # перезаписывает предыдущую настройку
+        force=True
     )
 
 # === Middleware для логирования входящих событий ===
@@ -70,25 +70,29 @@ async def log_middleware(handler, event, data):
 
     return await handler(event, data)
 
-# === Обработчик ошибок ===
-async def error_handler(update, exception):
+# === Обработчик ошибок (aiogram 3.x) ===
+async def error_handler(event: ErrorEvent, **kwargs):
     logger = logging.getLogger(__name__)
     extra = {"user": "Unknown", "user_id": "Unknown"}
 
-    if update and hasattr(update, 'message') and update.message:
+    exception = event.exception
+    update = event.update
+
+    if update and update.message:
         user = update.message.from_user
         extra["user"] = f"{user.full_name} (@{user.username})" if user.username else user.full_name
         extra["user_id"] = user.id
-    elif update and hasattr(update, 'callback_query') and update.callback_query:
+    elif update and update.callback_query:
         user = update.callback_query.from_user
         extra["user"] = f"{user.full_name} (@{user.username})" if user.username else user.full_name
         extra["user_id"] = user.id
 
-    if isinstance(exception, TelegramAPIError):
-        logger.error(f"❌ Telegram API Error: {exception}", extra=extra)
+    if isinstance(exception, (TelegramAPIError, TelegramNetworkError)):
+        logger.error(f"❌ Telegram Error: {exception}", extra=extra)
     else:
         logger.exception("💥 Необработанное исключение:", exc_info=exception, extra=extra)
-    return True
+
+    return True  # подавляем дальнейшее распространение ошибки
 
 # === Основная функция ===
 async def main():
