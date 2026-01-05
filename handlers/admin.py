@@ -1,185 +1,101 @@
-# handlers/admin.py
+from aiogram import Router, F
+from aiogram.types import Message, CallbackQuery
+from aiogram.fsm.context import FSMContext
+from aiogram.filters import Command
+from handlers.modules import LESSONS
 import json
 import os
-from aiogram import Router, F
-from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
-from aiogram.fsm.state import State, StatesGroup
-from aiogram.fsm.context import FSMContext
+from dareira_api import dareira_rewrite  # Важно: импорт из корня
 from config import ADMIN_USER_ID
+# handlers/admin.py
+
+from aiogram import Router, F, Bot
+from aiogram.types import Message
+from aiogram.filters import Command
+from dareira_api import dareira_rewrite  # для генерации текста в стиле Рика
+import random
+import json
+import os
+
+# === СПИСОК ТЕМ ДЛЯ СТАТЕЙ ===
+ARTICLE_TOPICS = [
+    "Кровожадное программирование",
+    "Как я убил 3 бага за 5 минут",
+    "DevOps и космические корабли",
+    "Почему твой Docker контейнер сожрал весь сервер",
+    "Секретные приемы от деда Рика для junior DevOps",
+    "Как выжить в продакшене без кофе",
+    "Почему все боятся iowait",
+    "Zombie процессы: как я спас мир от апокалипсиса",
+    "Когда стоит использовать top -H и почему это спасет тебе жизнь",
+    "Что делать, когда твой сервер плачет от нагрузки",
+    "Что такое load average и почему твой сервер не взорвался",
+    "Как я обманул OOM Killer и выжил",
+    "Секреты systemd, о которых молчат все DevOps'ы",
+    "Почему твой swap — это не друг, а враг",
+    "Как я научился читать логи быстрее, чем Морти читает мемы"
+]
 
 router = Router()
 
-# Путь к данным
-LESSONS_FILE = "data/lessons.json"
-
-# Загружаем уроки
-def load_lessons():
-    with open(LESSONS_FILE, encoding="utf-8") as f:
-        return json.load(f)
-
-def save_lessons(data):
-    with open(LESSONS_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
-
-# FSM состояния
-class AdminEdit(StatesGroup):
-    waiting_for_module = State()
-    waiting_for_lesson_number = State()
-    waiting_for_field = State()
-    waiting_for_new_value = State()
-    waiting_for_new_lesson_data = State()  # для добавления
-
-# Проверка админа
-def is_admin(user_id: int) -> bool:
-    return user_id == ADMIN_USER_ID
-
-@router.message(F.text == "/admin")
-async def admin_panel(message: Message):
-    if not is_admin(message.from_user.id):
-        await message.answer("🚫 У вас нет доступа к админке.")
+@router.message(Command("restyle"))
+async def restyle_all_content(message: Message):
+    your_id = message.from_user.id
+    await message.answer(f"🔍 Твой ID: {your_id}\n📋 ID админа в конфиге: {ADMIN_USER_ID}")
+    
+    if message.from_user.id != ADMIN_USER_ID:
+        await message.answer("🚫 Эта команда только для администратора")
         return
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="✏️ Редактировать урок", callback_data="admin:edit")],
-        [InlineKeyboardButton(text="➕ Добавить урок", callback_data="admin:add")],
-        [InlineKeyboardButton(text="🔄 Обновить данные", callback_data="admin:reload")]
-    ])
-    await message.answer("🛠️ Панель администратора", reply_markup=kb)
-
-# === РЕДАКТИРОВАНИЕ ===
-@router.callback_query(F.data == "admin:edit")
-async def edit_start(callback: CallbackQuery, state: FSMContext):
-    if not is_admin(callback.from_user.id):
+    
+    await message.answer("🎨 Начинаю переписывать контент в стиле автора...")
+    
+    if not os.path.exists("data/author_style.txt"):
+        await message.answer("❌ Файл data/author_style.txt не найден")
         return
-    lessons = load_lessons()
-    modules = list(lessons.keys())
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=m, callback_data=f"admin:module:{m}")] for m in modules
-    ] + [[InlineKeyboardButton(text="🔙 Назад", callback_data="admin:back")]]
-    )
-    await callback.message.edit_text("Выберите модуль для редактирования:", reply_markup=kb)
-    await state.set_state(AdminEdit.waiting_for_module)
-
-@router.callback_query(F.data.startswith("admin:module:"))
-async def choose_lesson_number(callback: CallbackQuery, state: FSMContext):
-    if not is_admin(callback.from_user.id):
+    
+    with open("data/author_style.txt", "r", encoding="utf-8") as f:
+        style_prompt = f.read().strip()
+    
+    if not os.path.exists("data/lessons.json"):
+        await message.answer("❌ Файл data/lessons.json не найден")
         return
-    module = callback.data.split(":")[2]
-    lessons = load_lessons()
-    lesson_list = lessons.get(module, [])
-    if not lesson_list:
-        await callback.message.edit_text("В этом модуле нет уроков.")
-        return
-    opts = [
-        [InlineKeyboardButton(text=f"Урок {i+1}: {lesson['title']}", callback_data=f"admin:lesson:{module}:{i}")]
-        for i, lesson in enumerate(lesson_list)
-    ]
-    opts.append([InlineKeyboardButton(text="🔙 Назад", callback_data="admin:edit")])
-    await callback.message.edit_text(f"Модуль: {module}\nВыберите урок:", reply_markup=InlineKeyboardMarkup(inline_keyboard=opts))
-    await state.update_data(module=module)
-    await state.set_state(AdminEdit.waiting_for_lesson_number)
+    
+    with open("data/lessons.json", "r", encoding="utf-8") as f:
+        lessons = json.load(f)
+    
+    total_updated = 0
+    errors = []
+    
+    for module, lesson_list in lessons.items():
+        for i, lesson in enumerate(lesson_list):
+            original = lesson.get("content", "").strip()
+            if not original or len(original) < 20:
+                continue
+            
+            try:
+                await message.answer(f"✏️ Обрабатываю: {lesson.get('title')}")
+                new_content = dareira_rewrite(original, style_prompt)
+                
+                if not new_content or len(new_content.strip()) < 50:
+                    errors.append(f"⚠️ '{lesson.get('title')}' — ответ слишком короткий, оставлен как есть")
+                    continue
+                
+                lesson["content"] = new_content.strip()
+                total_updated += 1
+                
+                import asyncio
+                await asyncio.sleep(2)
+                
+            except Exception as e:
+                errors.append(f"⚠️ Ошибка в '{lesson.get('title')}': {str(e)}")
+                continue
+    
+    with open("data/lessons.json", "w", encoding="utf-8") as f:
+        json.dump(lessons, f, ensure_ascii=False, indent=2)
+    
+    report = f"✨ Готово! Обновлено {total_updated} уроков.\n"
+    if errors:
+        report += "\n❌ Ошибки:\n" + "\n".join(errors[:5])
+    
+    await message.answer(report)
 
-@router.callback_query(F.data.startswith("admin:lesson:"))
-async def choose_field(callback: CallbackQuery, state: FSMContext):
-    if not is_admin(callback.from_user.id):
-        return
-    parts = callback.data.split(":")
-    module = parts[2]
-    lesson_idx = int(parts[3])
-    await state.update_data(module=module, lesson_idx=lesson_idx)
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📝 Название", callback_data="admin:field:title")],
-        [InlineKeyboardButton(text="📄 Содержание", callback_data="admin:field:content")],
-        [InlineKeyboardButton(text="🔙 Назад", callback_data=f"admin:module:{module}")]
-    ])
-    await callback.message.edit_text("Что хотите изменить?", reply_markup=kb)
-    await state.set_state(AdminEdit.waiting_for_field)
-
-@router.callback_query(F.data.startswith("admin:field:"))
-async def enter_new_value(callback: CallbackQuery, state: FSMContext):
-    if not is_admin(callback.from_user.id):
-        return
-    field = callback.data.split(":")[2]
-    await state.update_data(field=field)
-    await callback.message.edit_text(f"Введите новое значение для поля '{field}':")
-    await state.set_state(AdminEdit.waiting_for_new_value)
-
-@router.message(AdminEdit.waiting_for_new_value)
-async def save_new_value(message: Message, state: FSMContext):
-    if not is_admin(message.from_user.id):
-        return
-    data = await state.get_data()
-    module = data["module"]
-    lesson_idx = data["lesson_idx"]
-    field = data["field"]
-    new_value = message.text
-
-    lessons = load_lessons()
-    lessons[module][lesson_idx][field] = new_value
-    save_lessons(lessons)
-
-    await message.answer("✅ Урок обновлён!")
-    await state.clear()
-    # Вернуть в админку
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="✏️ Редактировать ещё", callback_data="admin:edit")],
-        [InlineKeyboardButton(text="🛠️ Админка", callback_data="admin:back")]
-    ])
-    await message.answer("Что дальше?", reply_markup=kb)
-
-# === ДОБАВЛЕНИЕ УРОКА ===
-@router.callback_query(F.data == "admin:add")
-async def add_lesson_start(callback: CallbackQuery, state: FSMContext):
-    if not is_admin(callback.from_user.id):
-        return
-    lessons = load_lessons()
-    modules = list(lessons.keys())
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=m, callback_data=f"admin:add_module:{m}")] for m in modules
-    ] + [[InlineKeyboardButton(text="🔙 Назад", callback_data="admin:back")]]
-    )
-    await callback.message.edit_text("Выберите модуль для добавления урока:", reply_markup=kb)
-
-@router.callback_query(F.data.startswith("admin:add_module:"))
-async def add_lesson_title(callback: CallbackQuery, state: FSMContext):
-    module = callback.data.split(":")[2]
-    await state.update_data(module=module, step="title")
-    await callback.message.edit_text("Введите название нового урока:")
-
-@router.message(F.text)
-async def add_lesson_content_or_save(message: Message, state: FSMContext):
-    if not is_admin(message.from_user.id):
-        return
-    current_state = await state.get_state()
-    if current_state not in [None, ""]:
-        return  # Чтобы не мешало основному боту
-
-    data = await state.get_data()
-    step = data.get("step")
-    module = data.get("module")
-
-    if step == "title":
-        await state.update_data(title=message.text, step="content")
-        await message.answer("Введите содержание урока:")
-    elif step == "content":
-        lessons = load_lessons()
-        new_lesson = {
-            "title": data["title"],
-            "content": message.text,
-            "questions": []  # можно расширить позже
-        }
-        lessons[module].append(new_lesson)
-        save_lessons(lessons)
-        await message.answer("✅ Новый урок добавлен!")
-        await state.clear()
-
-# === НАЗАД В АДМИНКУ ===
-@router.callback_query(F.data == "admin:back")
-async def back_to_admin(callback: CallbackQuery):
-    if not is_admin(callback.from_user.id):
-        return
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="✏️ Редактировать урок", callback_data="admin:edit")],
-        [InlineKeyboardButton(text="➕ Добавить урок", callback_data="admin:add")],
-        [InlineKeyboardButton(text="🔄 Обновить данные", callback_data="admin:reload")]
-    ])
-    await callback.message.edit_text("🛠️ Панель администратора", reply_markup=kb)
