@@ -46,3 +46,11 @@ async def is_user_premium(user_id: int) -> bool:
         cursor = await db.execute("SELECT is_premium FROM users WHERE user_id = ?", (user_id,))
         row = await cursor.fetchone()
         return bool(row[0]) if row else False        
+
+async def set_user_premium(user_id: int, is_premium: bool):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "UPDATE users SET is_premium = ? WHERE user_id = ?",
+            (int(is_premium), user_id)
+        )
+        await db.commit()

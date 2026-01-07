@@ -1,17 +1,21 @@
 import json
+import logging
 from aiogram import Router, F
 from aiogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from database import get_user, update_user_progress
-from dareira_api import dareira_rewrite  # Важно: импорт из корня
+from database import get_user, update_user_progress, is_user_premium
+from dareira_api import dareira_rewrite
 from config import ADMIN_USER_ID
+
+logger = logging.getLogger(__name__)
 
 router = Router()
 
 # Загрузка уроков
 with open("data/lessons.json", encoding="utf-8") as f:
     LESSONS = json.load(f)
+
 
 # === КЛАВИАТУРЫ ===
 
@@ -30,6 +34,7 @@ def get_modules_keyboard():
         [InlineKeyboardButton(text="🧠 Dareira AI", callback_data="dareira_help")]
     ])
 
+
 def get_lessons_keyboard(module: str, available_lessons: list, completed: set, lessons: list):
     buttons = []
     for i in available_lessons:
@@ -41,6 +46,7 @@ def get_lessons_keyboard(module: str, available_lessons: list, completed: set, l
     buttons.append([InlineKeyboardButton(text="🔙 Назад", callback_data="back_to_modules")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
+
 def get_test_keyboard(options: list, module: str, lesson_idx: int):
     kb = []
     for i, opt in enumerate(options):
@@ -50,13 +56,10 @@ def get_test_keyboard(options: list, module: str, lesson_idx: int):
     kb.append([InlineKeyboardButton(text="🔙 Отмена", callback_data="cancel_test")])
     return InlineKeyboardMarkup(inline_keyboard=kb)
 
+
 # === ВСПОМОГАТЕЛЬНАЯ ФУНКЦИЯ ДЛЯ ДЛИННЫХ СООБЩЕНИЙ ===
 
-async def send_long_message(message, text: str, parse_mode="Markdown", reply_markup=None, **kwargs):
-    """
-    Отправляет длинное сообщение, разбивая его на части ≤ 4000 символов.
-    Клавиатура (reply_markup) прикрепляется только к первому сообщению.
-    """
+async def send_long_message(bot, chat_id: int, text: str, parse_mode="Markdown", reply_markup=None, **kwargs):
     MAX_LEN = 4000
     parts = []
     current = text
@@ -76,95 +79,209 @@ async def send_long_message(message, text: str, parse_mode="Markdown", reply_mar
 
     for i, part in enumerate(parts):
         if i == 0:
-            await message.answer(part, parse_mode=parse_mode, reply_markup=reply_markup, **kwargs)
+            await bot.send_message(chat_id=chat_id, text=part, parse_mode=parse_mode, reply_markup=reply_markup, **kwargs)
         else:
-            await message.answer(part, parse_mode=parse_mode, **kwargs)
+            await bot.send_message(chat_id=chat_id, text=part, parse_mode=parse_mode, **kwargs)
+
 
 # === FSM ===
 
 class TestState(StatesGroup):
     in_test = State()
 
+
 # === ОБРАБОТЧИКИ ===
 
 @router.callback_query(F.data == "back_to_modules")
 async def back_to_modules(callback: CallbackQuery, state: FSMContext):
-    await state.clear()
-    await callback.message.delete()
-    await callback.message.answer("Выбери модуль:", reply_markup=get_modules_keyboard())
-    await callback.answer()
+    try:
+        await state.clear()
+        try:
+            await callback.message.delete()
+        except Exception:
+            pass
+
+        await callback.bot.send_message(
+            chat_id=callback.from_user.id,
+            text="Выбери модуль:",
+            reply_markup=get_modules_keyboard()
+        )
+        await callback.answer()
+    except Exception as e:
+        logger.exception("Ошибка в back_to_modules")
+        try:
+            await callback.answer("⚠️ Не удалось вернуться в меню. Отправьте /start.", show_alert=True)
+        except Exception:
+            pass
+
 
 @router.callback_query(F.data.startswith("module:"))
 async def show_lessons_list(callback: CallbackQuery, state: FSMContext):
-    await state.clear()
-    module = callback.data.split(":", 1)[1]
+    try:
+        await state.clear()
+        module = callback.data.split(":", 1)[1]
 
-    lessons = LESSONS.get(module)
-    if not lessons:
-        await callback.message.edit_text("Модуль пока пуст.")
-        return
+        lessons = LESSONS.get(module)
+        if not lessons:
+            await callback.bot.send_message(
+                chat_id=callback.from_user.id,
+                text="Модуль пока пуст."
+            )
+            return
 
-    user = await get_user(callback.from_user.id)
-    completed = set()
-    if user and user[5] not in (None, "[]", ""):
+        user = await get_user(callback.from_user.id)
+        completed = set()
+        if user and user[5] not in (None, "[]", ""):
+            try:
+                completed_str_list = json.loads(user[5])
+                completed = {(mod, str(idx)) for (mod, idx) in [tuple(item.split(":", 1)) for item in completed_str_list]}
+            except (json.JSONDecodeError, ValueError, TypeError):
+                pass
+
+        available_lessons = list(range(len(lessons)))
+        keyboard = get_lessons_keyboard(module, available_lessons, completed, lessons)
+
         try:
-            completed_str_list = json.loads(user[5])
-            completed = {(mod, str(idx)) for (mod, idx) in [tuple(item.split(":", 1)) for item in completed_str_list]}
-        except (json.JSONDecodeError, ValueError, TypeError):
+            await callback.message.edit_text(
+                f"📚 Модуль: {module.capitalize()}",
+                reply_markup=keyboard
+            )
+        except Exception:
+            await callback.bot.send_message(
+                chat_id=callback.from_user.id,
+                text=f"📚 Модуль: {module.capitalize()}",
+                reply_markup=keyboard
+            )
+    except Exception as e:
+        logger.exception("Ошибка в show_lessons_list")
+        try:
+            await callback.answer("⚠️ Ошибка загрузки модуля.", show_alert=True)
+        except Exception:
             pass
 
-    # ВСЕ УРОКИ ДОСТУПНЫ ВСЕМ
-    available_lessons = list(range(len(lessons)))
-
-    keyboard = get_lessons_keyboard(module, available_lessons, completed, lessons)
-    await callback.message.edit_text(
-        f"📚 Модуль: {module.capitalize()}",
-        reply_markup=keyboard
-    )
 
 @router.callback_query(F.data.startswith("lesson:"))
 async def show_lesson_full(callback: CallbackQuery, state: FSMContext):
-    await state.clear()
-    _, module, lesson_idx = callback.data.split(":", 2)
-    lesson_idx = int(lesson_idx)
-    lesson = LESSONS[module][lesson_idx]
+    try:
+        await state.clear()
+        _, module, lesson_idx = callback.data.split(":", 2)
+        lesson_idx = int(lesson_idx)
 
-    await callback.message.delete()
+        # === ТОЛЬКО 5 УРОКОВ В LINUX БЕСПЛАТНО ===
+        is_free = (module == "linux" and lesson_idx < 5)
+        is_premium = await is_user_premium(callback.from_user.id)
 
-    full_text = f"📖 **Урок {lesson_idx + 1}: {lesson['title']}**\n\n{lesson['content']}"
+        if not is_premium and not is_free:
+            await callback.bot.send_message(
+                chat_id=callback.from_user.id,
+                text=(
+                    "Ты прошёл бесплатную часть пути.\n\n"
+                    "Я собрал этот материал, когда сам готовился к DevOps.\n"
+                    "На обучение я потратил больше 500 000 ₽ — здесь только то, что реально пригодилось.\n\n"
+                    "Дальше могу вести тебя глубже:\n"
+                    "– полный роадмап\n"
+                    "– практические задания\n"
+                    "– типовые ошибки на собеседованиях\n\n"
+                    "Доступ ко всей программе — 990 ₽.\n"
+                    "Это не курс, а мой личный путь без воды.\n\n"
+                    "Если готов идти дальше — нажми кнопку ниже."
+                ),
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text="💎 Купить за 990 Stars", callback_data="buy_course")],
+                    [InlineKeyboardButton(text="📚 Вернуться к урокам", callback_data=f"module:{module}")]
+                ])
+            )
+            await callback.answer()
+            return
 
-    # Отправляем с разбивкой, клавиатура — только к первому сообщению
-    await send_long_message(
-        callback.message,
-        full_text,
-        parse_mode="Markdown",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="✅ Пройти тест", callback_data=f"start_test:{module}:{lesson_idx}")],
-            [InlineKeyboardButton(text="🔙 Назад к урокам", callback_data=f"module:{module}")]
-        ])
-    )
-    await callback.answer()
+        lesson = LESSONS[module][lesson_idx]
+
+        try:
+            await callback.message.delete()
+        except Exception:
+            pass
+
+        full_text = f"📖 **Урок {lesson_idx + 1}: {lesson['title']}**\n\n{lesson['content']}"
+
+        await send_long_message(
+            callback.bot,
+            callback.from_user.id,
+            full_text,
+            parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="✅ Пройти тест", callback_data=f"start_test:{module}:{lesson_idx}")],
+                [InlineKeyboardButton(text="🔙 Назад к урокам", callback_data=f"module:{module}")]
+            ])
+        )
+        await callback.answer()
+    except Exception as e:
+        logger.exception("Ошибка в show_lesson_full")
+        try:
+            await callback.answer("⚠️ Не удалось загрузить урок.", show_alert=True)
+        except Exception:
+            pass
+
 
 @router.callback_query(F.data.startswith("start_test:"))
 async def start_test(callback: CallbackQuery, state: FSMContext):
-    _, module, lesson_idx = callback.data.split(":", 2)
-    lesson_idx = int(lesson_idx)
-    questions = LESSONS[module][lesson_idx]["questions"]
+    try:
+        _, module, lesson_idx = callback.data.split(":", 2)
+        lesson_idx = int(lesson_idx)
 
-    await state.set_state(TestState.in_test)
-    await state.update_data(
-        module=module,
-        lesson_idx=lesson_idx,
-        questions=questions,
-        current_idx=0,
-        correct=0
-    )
+        # === ПРОВЕРКА ДОСТУПА К ТЕСТУ ===
+        is_free = (module == "linux" and lesson_idx < 5)
+        is_premium = await is_user_premium(callback.from_user.id)
 
-    await callback.message.delete()
-    await send_question(callback.message, state)
-    await callback.answer()
+        if not is_premium and not is_free:
+            await callback.bot.send_message(
+                chat_id=callback.from_user.id,
+                text=(
+                    "Ты прошёл бесплатную часть пути.\n\n"
+                    "Я собрал этот материал, когда сам готовился к DevOps.\n"
+                    "На обучение я потратил больше 500 000 ₽ — здесь только то, что реально пригодилось.\n\n"
+                    "Дальше могу вести тебя глубже:\n"
+                    "– полный роадмап\n"
+                    "– практические задания\n"
+                    "– типовые ошибки на собеседованиях\n\n"
+                    "Доступ ко всей программе — 990 ₽.\n"
+                    "Это не курс, а мой личный путь без воды.\n\n"
+                    "Если готов идти дальше — нажми кнопку ниже."
+                ),
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text="💎 Купить за 990 Stars", callback_data="buy_course")],
+                    [InlineKeyboardButton(text="📚 Вернуться к урокам", callback_data=f"module:{module}")]
+                ])
+            )
+            await callback.answer()
+            return
 
-async def send_question(message, state: FSMContext):
+        questions = LESSONS[module][lesson_idx]["questions"]
+
+        await state.set_state(TestState.in_test)
+        await state.update_data(
+            module=module,
+            lesson_idx=lesson_idx,
+            questions=questions,
+            current_idx=0,
+            correct=0
+        )
+
+        try:
+            await callback.message.delete()
+        except Exception:
+            pass
+
+        await send_question(callback.bot, callback.from_user.id, state)
+        await callback.answer()
+    except Exception as e:
+        logger.exception("Ошибка в start_test")
+        try:
+            await callback.answer("⚠️ Не удалось начать тест.", show_alert=True)
+        except Exception:
+            pass
+
+
+async def send_question(bot, chat_id: int, state: FSMContext):
     data = await state.get_data()
     questions = data["questions"]
     current_idx = data["current_idx"]
@@ -183,7 +300,7 @@ async def send_question(message, state: FSMContext):
             xp = 0
 
         if xp > 0:
-            user = await get_user(message.chat.id)
+            user = await get_user(chat_id)
             if user:
                 try:
                     completed = json.loads(user[5]) if user[5] not in (None, "[]", "") else []
@@ -193,15 +310,15 @@ async def send_question(message, state: FSMContext):
                 if key not in completed:
                     completed.append(key)
                     await update_user_progress(
-                        message.chat.id, module, lesson_idx, xp, json.dumps(completed)
+                        chat_id, module, lesson_idx, xp, json.dumps(completed)
                     )
 
-        # ДОБАВЛЕНА КНОПКА «ПОДЕЛИТЬСЯ»
         share_text = f"Я набрал {correct} из {total} по DevOps! Проверь себя →"
         share_url = f"https://t.me/share/url?url=https://t.me/devvvops_bot&text={share_text.replace(' ', '%20')}"
 
-        await message.answer(
-            f"🎉 Тест завершён!\nПравильно: {correct}/{total}\n+{xp} XP",
+        await bot.send_message(
+            chat_id=chat_id,
+            text=f"🎉 Тест завершён!\nПравильно: {correct}/{total}\n+{xp} XP",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(text="📤 Поделиться результатом", url=share_url)],
                 [InlineKeyboardButton(text="📚 Вернуться к урокам", callback_data=f"module:{module}")]
@@ -211,98 +328,183 @@ async def send_question(message, state: FSMContext):
         return
 
     q = questions[current_idx]
-    await message.answer(
-        f"❓ Вопрос {current_idx + 1}/{total}\n\n{q['text']}",
+    await bot.send_message(
+        chat_id=chat_id,
+        text=f"❓ Вопрос {current_idx + 1}/{total}\n\n{q['text']}",
         reply_markup=get_test_keyboard(q["options"], data["module"], data["lesson_idx"])
     )
 
+
 @router.callback_query(F.data.startswith("answer:"))
 async def handle_answer(callback: CallbackQuery, state: FSMContext):
-    parts = callback.data.split(":", 3)
-    if len(parts) != 4:
-        await callback.answer("❌ Ошибка данных", show_alert=True)
-        return
+    try:
+        parts = callback.data.split(":", 3)
+        if len(parts) != 4:
+            await callback.answer("❌ Ошибка данных", show_alert=True)
+            return
 
-    _, module, lesson_idx, answer_idx = parts
-    answer_idx = int(answer_idx)
+        _, module, lesson_idx, answer_idx = parts
+        answer_idx = int(answer_idx)
 
-    data = await state.get_data()
-    if "questions" not in data:
-        await state.clear()
-        await callback.message.answer("❌ Тест был прерван. Начните заново.")
-        return
+        data = await state.get_data()
+        if "questions" not in data:
+            await state.clear()
+            await callback.bot.send_message(
+                chat_id=callback.from_user.id,
+                text="❌ Тест был прерван. Начните заново."
+            )
+            return
 
-    current_idx = data["current_idx"]
-    questions = data["questions"]
-    if current_idx >= len(questions):
-        await callback.answer("Тест уже завершён.", show_alert=True)
-        return
+        current_idx = data["current_idx"]
+        questions = data["questions"]
+        if current_idx >= len(questions):
+            await callback.answer("Тест уже завершён.", show_alert=True)
+            return
 
-    q = questions[current_idx]
-    correct = data["correct"]
+        q = questions[current_idx]
+        correct = data["correct"]
 
-    if answer_idx == q["correct"]:
-        correct += 1
-        await callback.message.answer("✅ Верно!")
-    else:
-        await callback.message.answer(f"❌ Неверно.\nПравильный ответ: {q['options'][q['correct']]}")
+        if answer_idx == q["correct"]:
+            correct += 1
+            await callback.bot.send_message(chat_id=callback.from_user.id, text="✅ Верно!")
+        else:
+            await callback.bot.send_message(
+                chat_id=callback.from_user.id,
+                text=f"❌ Неверно.\nПравильный ответ: {q['options'][q['correct']]}"
+            )
 
-    await state.update_data(current_idx=current_idx + 1, correct=correct)
-    await callback.message.delete()
-    await send_question(callback.message, state)
-    await callback.answer()
+        await state.update_data(current_idx=current_idx + 1, correct=correct)
+        try:
+            await callback.message.delete()
+        except Exception:
+            pass
+
+        await send_question(callback.bot, callback.from_user.id, state)
+        await callback.answer()
+    except Exception as e:
+        logger.exception("Ошибка в handle_answer")
+        try:
+            await callback.answer("⚠️ Ошибка в тесте.", show_alert=True)
+        except Exception:
+            pass
+
 
 @router.callback_query(F.data == "cancel_test")
 async def cancel_test(callback: CallbackQuery, state: FSMContext):
-    await state.clear()
-    await callback.message.delete()
-    await callback.message.answer("↩️ Возврат в главное меню", reply_markup=get_modules_keyboard())
-    await callback.answer()
+    try:
+        await state.clear()
+        try:
+            await callback.message.delete()
+        except Exception:
+            pass
 
-# === НОВЫЕ ОБРАБОТЧИКИ: КАРТИНКИ И СТАТЬИ ===
+        await callback.bot.send_message(
+            chat_id=callback.from_user.id,
+            text="↩️ Возврат в главное меню",
+            reply_markup=get_modules_keyboard()
+        )
+        await callback.answer()
+    except Exception as e:
+        logger.exception("Ошибка в cancel_test")
+        try:
+            await callback.answer("⚠️ Ошибка возврата. Отправьте /start.", show_alert=True)
+        except Exception:
+            pass
+
+
+# === СТАТЬЯ И ИЗОБРАЖЕНИЕ ===
 
 @router.callback_query(F.data == "show_image")
 async def show_image(callback: CallbackQuery):
-    img_url = "https://i.imgur.com/5KQbZ7l.png"
-    caption = "🧠 **Статистика обучения DevOps**\n\n" \
-              "→ 85% джунов боятся терминала\n" \
-              "→ 92% не знают разницы между Load Average и CPU%\n" \
-              "→ 76% не проходят собеседования из-за пробелов в знаниях\n\n" \
-              "🔥 Dareira закрывает эти пробелы за 5 минут в день."
-    
-    await callback.message.answer_photo(
-        photo=img_url,
-        caption=caption,
-        parse_mode="Markdown",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="📚 Вернуться к урокам", callback_data="back_to_modules")]
-        ])
-    )
-    await callback.answer()
+    try:
+        img_url = "https://i.imgur.com/5KQbZ7l.png"
+        caption = "🧠 **Статистика обучения DevOps**\n\n" \
+                  "→ 85% джунов боятся терминала\n" \
+                  "→ 92% не знают разницы между Load Average и CPU%\n" \
+                  "→ 76% не проходят собеседования из-за пробелов в знаниях\n\n" \
+                  "🔥 Dareira закрывает эти пробелы за 5 минут в день."
+
+        await callback.bot.send_photo(
+            chat_id=callback.from_user.id,
+            photo=img_url,
+            caption=caption,
+            parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="📚 Вернуться к урокам", callback_data="back_to_modules")]
+            ])
+        )
+        await callback.answer()
+    except Exception as e:
+        logger.exception("Ошибка в show_image")
+        try:
+            await callback.answer("⚠️ Не удалось загрузить изображение.", show_alert=True)
+        except Exception:
+            pass
+
 
 @router.callback_query(F.data == "show_article")
 async def show_article(callback: CallbackQuery):
-    article_text = (
-        "🚀 **Почему DevOps — это не про инструменты, а про мышление**\n\n"
-        "Большинство джунов ошибочно считают, что DevOps — это:\n"
-        "→ Docker + Kubernetes\n"
-        "→ Ansible + Terraform\n"
-        "→ CI/CD пайплайны\n\n"
-        "Но настоящий DevOps — это:\n"
-        "✅ Системное мышление: как части влияют на целое\n"
-        "✅ Ответственность за продукт от идеи до продакшена\n"
-        "✅ Культура, где ошибка — это возможность для роста\n\n"
-        "🔥 Ключевая метрика успеха: **MTTR (Mean Time To Recovery)** —\n"
-        "сколько времени уходит на восстановление после сбоя.\n"
-        "Не MTBF (Mean Time Between Failures) — ломаться всё равно будет.\n\n"
-        "💡 Dareira учит именно системному мышлению, а не кнопкам в интерфейсе."
-    )
-    
-    await callback.message.answer(
-        article_text,
-        parse_mode="Markdown",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="📚 Вернуться к урокам", callback_data="back_to_modules")]
-        ])
-    )
-    await callback.answer()
+    try:
+        article_text = (
+            "🚀 **Почему DevOps — это не про инструменты, а про мышление**\n\n"
+            "Большинство джунов ошибочно считают, что DevOps — это:\n"
+            "→ Docker + Kubernetes\n"
+            "→ Ansible + Terraform\n"
+            "→ CI/CD пайплайны\n\n"
+            "Но настоящий DevOps — это:\n"
+            "✅ Системное мышление: как части влияют на целое\n"
+            "✅ Ответственность за продукт от идеи до продакшена\n"
+            "✅ Культура, где ошибка — это возможность для роста\n\n"
+            "🔥 Ключевая метрика успеха: **MTTR (Mean Time To Recovery)** —\n"
+            "сколько времени уходит на восстановление после сбоя.\n"
+            "Не MTBF (Mean Time Between Failures) — ломаться всё равно будет.\n\n"
+            "💡 Dareira учит именно системному мышлению, а не кнопкам в интерфейсе."
+        )
+
+        await callback.bot.send_message(
+            chat_id=callback.from_user.id,
+            text=article_text,
+            parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="📚 Вернуться к урокам", callback_data="back_to_modules")]
+            ])
+        )
+        await callback.answer()
+    except Exception as e:
+        logger.exception("Ошибка в show_article")
+        try:
+            await callback.answer("⚠️ Не удалось загрузить статью.", show_alert=True)
+        except Exception:
+            pass
+
+
+# === DAREIRA AI ===
+
+@router.callback_query(F.data == "dareira_help")
+async def dareira_help(callback: CallbackQuery):
+    try:
+        text = (
+            "🧠 **Dareira AI**\n\n"
+            "Задай любой вопрос по DevOps!\n"
+            "Просто отправь сообщение в формате:\n"
+            "`/dareira [твой вопрос]`\n\n"
+            "Примеры:\n"
+            "`/dareira Что такое Load Average?`\n"
+            "`/dareira Как работает Docker?`\n"
+            "`/dareira Почему мой K8s под в CrashLoopBackOff?`"
+        )
+        await callback.bot.send_message(
+            chat_id=callback.from_user.id,
+            text=text,
+            parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="📚 Вернуться к урокам", callback_data="back_to_modules")]
+            ])
+        )
+        await callback.answer()
+    except Exception as e:
+        logger.exception("Ошибка в dareira_help")
+        try:
+            await callback.answer("⚠️ Не удалось открыть Dareira AI.", show_alert=True)
+        except Exception:
+            pass
