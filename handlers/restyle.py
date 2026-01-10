@@ -27,11 +27,17 @@ async def handle_restyle(message: types.Message):
     try:
         # 1. Загружаем промпт
         prompt_template = load_prompt()
-        await message.answer("🔄 Промпт загружен. Начинаю переписывание уроков...")
+        await message.answer(
+            "🔄 Промпт загружен. Начинаю переписывание уроков...",
+            parse_mode="Markdown"
+        )
 
         # 2. Загружаем уроки
         if not os.path.isfile(LESSONS_PATH):
-            await message.answer("❌ Файл lessons.json не найден")
+            await message.answer(
+                "❌ Файл lessons.json не найден",
+                parse_mode="Markdown"
+            )
             return
 
         with open(LESSONS_PATH, "r", encoding="utf-8") as f:
@@ -53,7 +59,10 @@ async def handle_restyle(message: types.Message):
                     continue
 
                 try:
-                    await message.answer(f"♻️ Обрабатываю: {lesson.get('title', f'{module_name}[{i}]')}")
+                    await message.answer(
+                        f"♻️ Обрабатываю: {lesson.get('title', f'{module_name}[{i}]')}",
+                        parse_mode="Markdown"
+                    )
 
                     rewritten = await rewrite_text_with_prompt(original, prompt_template)
                     lesson["content"] = rewritten
@@ -66,11 +75,23 @@ async def handle_restyle(message: types.Message):
                     await asyncio.sleep(1)  # уважаем лимиты Yandex API
 
                 except Exception as e:
-                    await message.answer(f"⚠️ Ошибка в {module_name}[{i}]: {str(e)[:100]}")
+                    await message.answer(
+                        f"⚠️ Ошибка в {module_name}[{i}]: {str(e)[:100]}",
+                        parse_mode="Markdown"
+                    )
 
-        await message.answer(f"✅ Готово! Переписано {total_updated} уроков. Все сообщения теперь читаемы в Telegram!")
+        await message.answer(
+            f"✅ Готово! Переписано {total_updated} уроков. Все сообщения теперь читаемы в Telegram!",
+            parse_mode="Markdown"
+        )
 
     except FileNotFoundError as e:
-        await message.answer(f"❌ Ошибка: {e}")
+        await message.answer(
+            f"❌ Ошибка: {e}",
+            parse_mode="Markdown"
+        )
     except Exception as e:
-        await message.answer(f"💥 Критическая ошибка: {str(e)}")
+        await message.answer(
+            f"💥 Критическая ошибка: {str(e)}",
+            parse_mode="Markdown"
+        )

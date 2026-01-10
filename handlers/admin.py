@@ -87,7 +87,7 @@ def get_questions_keyboard(module, lesson_idx, questions):
 @router.message(Command("admin"))
 async def cmd_admin(message: Message, state: FSMContext):
     if message.from_user.id != ADMIN_USER_ID:
-        await message.answer("🚫 Доступ запрещён.")
+        await message.answer("🚫 Доступ запрещён.", parse_mode="Markdown")
         return
     await state.clear()
     lessons = load_lessons()
@@ -160,22 +160,22 @@ async def admin_view_lesson(callback: CallbackQuery, state: FSMContext):
 @router.callback_query(F.data == "admin_new_module")
 async def admin_new_module(callback: CallbackQuery, state: FSMContext):
     await state.set_state(AdminState.waiting_for_module_name)
-    await callback.message.answer("✏️ Введите название нового модуля (например, 'Безопасность'):")
+    await callback.message.answer("✏️ Введите название нового модуля (например, 'Безопасность'):", parse_mode="Markdown")
     await callback.answer()
 
 @router.message(AdminState.waiting_for_module_name)
 async def process_new_module_name(message: Message, state: FSMContext):
     module_name = message.text.strip()
     if not module_name:
-        await message.answer("❌ Название не может быть пустым. Попробуйте снова:")
+        await message.answer("❌ Название не может быть пустым. Попробуйте снова:", parse_mode="Markdown")
         return
     lessons = load_lessons()
     if module_name in lessons:
-        await message.answer(f"⚠️ Модуль '{module_name}' уже существует.")
+        await message.answer(f"⚠️ Модуль '{module_name}' уже существует.", parse_mode="Markdown")
         return
     lessons[module_name] = []
     save_lessons(lessons)
-    await message.answer(f"✅ Модуль '{module_name}' создан!")
+    await message.answer(f"✅ Модуль '{module_name}' создан!", parse_mode="Markdown")
     await state.clear()
     await message.answer(
         "🛠️ <b>Админ-панель курса</b>\nВыберите модуль:",
@@ -217,24 +217,24 @@ async def admin_new_lesson(callback: CallbackQuery, state: FSMContext):
     module = callback.data.split(":", 1)[1]
     await state.update_data(current_module=module)
     await state.set_state(AdminState.waiting_for_lesson_title)
-    await callback.message.answer("✏️ Введите название урока:")
+    await callback.message.answer("✏️ Введите название урока:", parse_mode="Markdown")
     await callback.answer()
 
 @router.message(AdminState.waiting_for_lesson_title)
 async def process_lesson_title(message: Message, state: FSMContext):
     title = message.text.strip()
     if not title:
-        await message.answer("❌ Название не может быть пустым.")
+        await message.answer("❌ Название не может быть пустым.", parse_mode="Markdown")
         return
     await state.update_data(lesson_title=title)
     await state.set_state(AdminState.waiting_for_lesson_content)
-    await message.answer("✏️ Введите текст урока (поддерживается Markdown):")
+    await message.answer("✏️ Введите текст урока (поддерживается Markdown):", parse_mode="Markdown")
 
 @router.message(AdminState.waiting_for_lesson_content)
 async def process_lesson_content(message: Message, state: FSMContext):
     content = message.text.strip()
     if not content:
-        await message.answer("❌ Текст не может быть пустым.")
+        await message.answer("❌ Текст не может быть пустым.", parse_mode="Markdown")
         return
     data = await state.get_data()
     module = data["current_module"]
@@ -246,7 +246,7 @@ async def process_lesson_content(message: Message, state: FSMContext):
         "questions": []
     })
     save_lessons(lessons)
-    await message.answer(f"✅ Урок '{title}' добавлен!")
+    await message.answer(f"✅ Урок '{title}' добавлен!", parse_mode="Markdown")
     await state.clear()
     await message.answer(
         f"📚 Модуль: <b>{module}</b>\nВыберите урок:",
@@ -259,14 +259,14 @@ async def admin_edit_content(callback: CallbackQuery, state: FSMContext):
     _, module, lesson_idx = callback.data.split(":")
     await state.update_data(edit_module=module, edit_lesson_idx=int(lesson_idx))
     await state.set_state(AdminState.editing_lesson_content)
-    await callback.message.answer("✏️ Отправьте новый текст урока:")
+    await callback.message.answer("✏️ Отправьте новый текст урока:", parse_mode="Markdown")
     await callback.answer()
 
 @router.message(AdminState.editing_lesson_content)
 async def process_edit_content(message: Message, state: FSMContext):
     new_content = message.text.strip()
     if not new_content:
-        await message.answer("❌ Текст не может быть пустым.")
+        await message.answer("❌ Текст не может быть пустым.", parse_mode="Markdown")
         return
     data = await state.get_data()
     module = data["edit_module"]
@@ -274,7 +274,7 @@ async def process_edit_content(message: Message, state: FSMContext):
     lessons = load_lessons()
     lessons[module][lesson_idx]["content"] = new_content
     save_lessons(lessons)
-    await message.answer("✅ Текст урока обновлён!")
+    await message.answer("✅ Текст урока обновлён!", parse_mode="Markdown")
     await state.clear()
     await message.answer(
         f"📚 Модуль: <b>{module}</b>\nВыберите урок:",
@@ -327,41 +327,41 @@ async def admin_new_question_start(callback: CallbackQuery, state: FSMContext):
     _, module, lesson_idx = callback.data.split(":")
     await state.update_data(q_module=module, q_lesson_idx=int(lesson_idx))
     await state.set_state(AdminState.waiting_for_question_text)
-    await callback.message.answer("✏️ Введите текст вопроса:")
+    await callback.message.answer("✏️ Введите текст вопроса:", parse_mode="Markdown")
     await callback.answer()
 
 @router.message(AdminState.waiting_for_question_text)
 async def process_question_text(message: Message, state: FSMContext):
     text = message.text.strip()
     if not text:
-        await message.answer("❌ Текст вопроса не может быть пустым.")
+        await message.answer("❌ Текст вопроса не может быть пустым.", parse_mode="Markdown")
         return
     await state.update_data(question_text=text)
     await state.set_state(AdminState.waiting_for_question_options)
-    await message.answer("✏️ Введите варианты ответов, каждый с новой строки:\n\nПример:\nDocker\nKubernetes\nAnsible\nTerraform")
+    await message.answer("✏️ Введите варианты ответов, каждый с новой строки:\n\nПример:\nDocker\nKubernetes\nAnsible\nTerraform", parse_mode="Markdown")
 
 @router.message(AdminState.waiting_for_question_options)
 async def process_question_options(message: Message, state: FSMContext):
     options = [opt.strip() for opt in message.text.strip().split("\n") if opt.strip()]
     if len(options) < 2:
-        await message.answer("❌ Нужно минимум 2 варианта. Попробуйте снова:")
+        await message.answer("❌ Нужно минимум 2 варианта. Попробуйте снова:", parse_mode="Markdown")
         return
     await state.update_data(question_options=options)
     await state.set_state(AdminState.waiting_for_correct_answer)
     opts_text = "\n".join([f"{i+1}. {opt}" for i, opt in enumerate(options)])
-    await message.answer(f"✅ Варианты:\n{opts_text}\n\n✏️ Введите номер правильного ответа (1-{len(options)}):")
+    await message.answer(f"✅ Варианты:\n{opts_text}\n\n✏️ Введите номер правильного ответа (1-{len(options)}):", parse_mode="Markdown")
 
 @router.message(AdminState.waiting_for_correct_answer)
 async def process_correct_answer(message: Message, state: FSMContext):
     try:
         correct_idx = int(message.text.strip()) - 1
     except ValueError:
-        await message.answer("❌ Введите число. Попробуйте снова:")
+        await message.answer("❌ Введите число. Попробуйте снова:", parse_mode="Markdown")
         return
     data = await state.get_data()
     options = data["question_options"]
     if correct_idx < 0 or correct_idx >= len(options):
-        await message.answer(f"❌ Номер должен быть от 1 до {len(options)}. Попробуйте снова:")
+        await message.answer(f"❌ Номер должен быть от 1 до {len(options)}. Попробуйте снова:", parse_mode="Markdown")
         return
     module = data["q_module"]
     lesson_idx = data["q_lesson_idx"]
@@ -372,11 +372,11 @@ async def process_correct_answer(message: Message, state: FSMContext):
         "correct": correct_idx
     })
     save_lessons(lessons)
-    await message.answer("✅ Вопрос добавлен!")
+    await message.answer("✅ Вопрос добавлен!", parse_mode="Markdown")
     await state.clear()
     questions = lessons[module][lesson_idx]["questions"]
     await message.answer(
-        f"❓ Вопросы к уроку\nВсего: {len(questions)}",
+        f"❓ Вопросы к уроку\nВсего: {len(questions)}", parse_mode="Markdown")
         reply_markup=get_questions_keyboard(module, lesson_idx, questions)
     )
 
@@ -412,7 +412,7 @@ async def admin_delete_question(callback: CallbackQuery, state: FSMContext):
 @router.message(Command("topost"))
 async def cmd_topost(message: Message, state: FSMContext, bot: Bot):
     if message.from_user.id != ADMIN_USER_ID:
-        await message.answer("🚫 Только для админа")
+        await message.answer("🚫 Только для админа", parse_mode="Markdown")
         return
 
     args = message.text.split(maxsplit=1)
@@ -424,18 +424,18 @@ async def cmd_topost(message: Message, state: FSMContext, bot: Bot):
         return
 
     topic = args[1].strip()
-    await message.answer(f"🎨 Генерирую статью на тему: {topic}...")
+    await message.answer(f"🎨 Генерирую статью на тему: {topic}...", parse_mode="Markdown")
 
     try:
         if not os.path.exists("data/author_style.txt"):
-            await message.answer("❌ Не найден файл стиля: data/author_style.txt")
+            await message.answer("❌ Не найден файл стиля: data/author_style.txt", parse_mode="Markdown")
             return
 
         with open("data/author_style.txt", "r", encoding="utf-8") as f:
             style_prompt = f.read().strip()
 
         if not style_prompt:
-            await message.answer("❌ Файл стиля пуст!")
+            await message.answer("❌ Файл стиля пуст!", parse_mode="Markdown")
             return
 
         prompt = (
@@ -452,7 +452,7 @@ async def cmd_topost(message: Message, state: FSMContext, bot: Bot):
         article = dareira_rewrite(prompt, style_prompt)
 
         if not article or len(article) < 20:
-            await message.answer("❌ Не удалось сгенерировать статью. Попробуйте другую тему.")
+            await message.answer("❌ Не удалось сгенерировать статью. Попробуйте другую тему.", parse_mode="Markdown")
             return
 
         await state.update_data(article_to_post=article)
@@ -471,7 +471,7 @@ async def cmd_topost(message: Message, state: FSMContext, bot: Bot):
 
     except Exception as e:
         logger.exception("Ошибка в /topost")
-        await message.answer(f"❌ Ошибка генерации: {str(e)}")
+        await message.answer(f"❌ Ошибка генерации: {str(e)}", parse_mode="Markdown")
 
 
 @router.callback_query(F.data == "publish_to_channel")
@@ -512,9 +512,9 @@ import os
 @router.message(Command("reboot"))
 async def cmd_reboot(message: Message):
     if message.from_user.id != ADMIN_USER_ID:
-        await message.answer("🚫 Доступ запрещён.")
+        await message.answer("🚫 Доступ запрещён.", parse_mode="Markdown")
         return
 
-    await message.answer("🔄 Бот перезапускается...")
+    await message.answer("🔄 Бот перезапускается...", parse_mode="Markdown")
     logger.info(f"Админ {message.from_user.id} инициировал перезагрузку.")
     os._exit(0)

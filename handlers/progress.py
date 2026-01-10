@@ -55,8 +55,7 @@ async def show_progress(callback: CallbackQuery):
                 "📊 Твой прогресс (обновлён):\n\n"
                 f"• Статус: {status}\n"
                 f"• Опыт (XP): {xp}\n"
-                f"• Пройдено: {completed}/{total} уроков",
-                reply_markup=get_modules_keyboard()
+                f"• Пройдено: {completed}/{total} уроков",                parse_mode="Markdown",                reply_markup=get_modules_keyboard()
             )
         else:
             logger.exception("TelegramBadRequest в show_progress")
