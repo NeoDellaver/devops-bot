@@ -5,8 +5,6 @@ import os
 import sys
 from logging.handlers import RotatingFileHandler
 from aiogram import Bot, Dispatcher
-from aiogram.client.default import DefaultBotProperties
-from aiogram.enums import ParseMode
 from aiogram.types import Message, CallbackQuery, ErrorEvent
 from aiogram.exceptions import TelegramAPIError, TelegramNetworkError
 from database import init_db
@@ -109,12 +107,7 @@ async def main():
     logger.info("🔧 Инициализация базы данных...")
     await init_db()
 
-    bot = Bot(
-        token=BOT_TOKEN,
-        default=DefaultBotProperties(
-            parse_mode=ParseMode.MARKDOWN
-        )
-    )
+    bot = Bot(token=BOT_TOKEN)
     dp = Dispatcher()
 
     # Подключаем middleware и обработчик ошибок
