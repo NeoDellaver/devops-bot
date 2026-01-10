@@ -88,6 +88,7 @@ async def cmd_start(message: Message):
         # ВАЖНО: НЕ указываем parse_mode здесь — используем тот, что задан в Bot!
         await message.answer(
             intro_text,
+            parse_mode="Markdown",
             reply_markup=kb,
             disable_web_page_preview=True
         )
