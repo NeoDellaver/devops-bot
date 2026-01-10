@@ -376,7 +376,8 @@ async def process_correct_answer(message: Message, state: FSMContext):
     await state.clear()
     questions = lessons[module][lesson_idx]["questions"]
     await message.answer(
-        f"❓ Вопросы к уроку\nВсего: {len(questions)}", parse_mode="Markdown")
+        f"❓ Вопросы к уроку\nВсего: {len(questions)}",
+        parse_mode="Markdown",
         reply_markup=get_questions_keyboard(module, lesson_idx, questions)
     )
 
