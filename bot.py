@@ -1,12 +1,15 @@
 import asyncio
 import logging
 import os
+import sys
 from logging.handlers import RotatingFileHandler
 from aiogram import Bot, Dispatcher
+from aiogram.client.default import DefaultBotProperties
+from aiogram.enums import ParseMode
 from aiogram.types import Message, CallbackQuery, ErrorEvent
 from aiogram.exceptions import TelegramAPIError, TelegramNetworkError
-from config import BOT_TOKEN
 from database import init_db
+from config import BOT_TOKEN
 from handlers import start, modules, dareira, progress, admin
 
 # === Настройка логирования ===
@@ -40,7 +43,7 @@ def setup_logging():
     file_handler.addFilter(UserContextFilter())
 
     # Консольный логгер
-    console_handler = logging.StreamHandler()
+    console_handler = logging.StreamHandler(sys.stdout)
     console_handler.setFormatter(formatter)
     console_handler.addFilter(UserContextFilter())
 
@@ -70,7 +73,7 @@ async def log_middleware(handler, event, data):
 
     return await handler(event, data)
 
-# === Обработчик ошибок (aiogram 3.x) ===
+# === Обработчик ошибок (aiogram 3.x) с retry логикой ===
 async def error_handler(event: ErrorEvent, **kwargs):
     logger = logging.getLogger(__name__)
     extra = {"user": "Unknown", "user_id": "Unknown"}
@@ -87,8 +90,11 @@ async def error_handler(event: ErrorEvent, **kwargs):
         extra["user"] = f"{user.full_name} (@{user.username})" if user.username else user.full_name
         extra["user_id"] = user.id
 
-    if isinstance(exception, (TelegramAPIError, TelegramNetworkError)):
-        logger.error(f"❌ Telegram Error: {exception}", extra=extra)
+    if isinstance(exception, TelegramNetworkError):
+        logger.warning(f"⚠️ Сетевая ошибка (временная): {exception}", extra=extra)
+        # Не логируем как критическую ошибку - это временный сбой
+    elif isinstance(exception, TelegramAPIError):
+        logger.error(f"❌ Telegram API Error: {exception}", extra=extra)
     else:
         logger.exception("💥 Необработанное исключение:", exc_info=exception, extra=extra)
 
@@ -98,10 +104,17 @@ async def error_handler(event: ErrorEvent, **kwargs):
 async def main():
     setup_logging()
     logger = logging.getLogger(__name__)
+    
     logger.info("🔧 Инициализация базы данных...")
     await init_db()
 
-    bot = Bot(token=BOT_TOKEN)
+    bot = Bot(
+        token=BOT_TOKEN,
+        default=DefaultBotProperties(
+            parse_mode=ParseMode.MARKDOWN,
+            request_timeout=30  # 30 секунд таймаут для запросов
+        )
+    )
     dp = Dispatcher()
 
     # Подключаем middleware и обработчик ошибок
@@ -116,8 +129,13 @@ async def main():
     dp.include_router(admin.router)
 
     logger.info("🤖 Удаление webhook'ов и запуск polling...")
-    await bot.delete_webhook(drop_pending_updates=True)
-    await dp.start_polling(bot)
+    try:
+        await bot.delete_webhook(drop_pending_updates=True)
+    except Exception as e:
+        logger.warning(f"⚠️ Не удалось удалить webhook: {e}")
+
+    logger.info("🚀 Запуск polling...")
+    await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
 
 if __name__ == "__main__":
     asyncio.run(main())
