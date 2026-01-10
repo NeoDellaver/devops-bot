@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 import asyncio
 import logging
 import os
@@ -111,8 +112,7 @@ async def main():
     bot = Bot(
         token=BOT_TOKEN,
         default=DefaultBotProperties(
-            parse_mode=ParseMode.MARKDOWN,
-            request_timeout=30  # 30 секунд таймаут для запросов
+            parse_mode=ParseMode.MARKDOWN
         )
     )
     dp = Dispatcher()

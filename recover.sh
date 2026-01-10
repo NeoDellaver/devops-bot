@@ -37,6 +37,10 @@ pip install -r requirements.txt
 
 # Шаг 6: Проверить синтаксис
 echo "✔️ Проверка синтаксиса..."
+# Сначала исправить кодировку
+python3 fix_encoding.py
+
+# Потом проверить синтаксис
 python3 -m py_compile bot.py config.py database.py || {
     echo "❌ Ошибка синтаксиса!"
     exit 1

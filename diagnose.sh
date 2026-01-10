@@ -64,6 +64,7 @@ echo ""
 # Проверка 8: Синтаксис Python
 echo "✔️ Проверка синтаксиса bot.py:"
 source venv/bin/activate 2>/dev/null
+python3 fix_encoding.py 2>/dev/null || true  # Исправить кодировку файлов
 python3 -m py_compile bot.py 2>&1 && echo "✅ Синтаксис OK" || echo "❌ Ошибка синтаксиса!"
 deactivate 2>/dev/null
 echo ""
